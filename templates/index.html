@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battleship - Two Player</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #f0f0f0; }
+        .grid {
+            display: grid; grid-template-columns: repeat(10, 30px); grid-gap: 2px;
+            margin: 10px auto; padding: 10px; background-color: #ccc;
+        }
+        .cell {
+            width: 30px; height: 30px; background-color: white;
+            border: 1px solid #999; cursor: pointer;
+        }
+        .ship { background-color: #6495ED; } /* Blue */
+        .hidden-ship { background-color: white !important; } /* Hide ships after start */
+        .hit { background-color: red !important; color: white; } /* Black for hit */
+        .miss { background-color: blue !important; color: white; } /* Blue for miss */
+        #message { font-weight: bold; margin: 10px; }
+        button { padding: 10px 20px; font-size: 16px; margin: 5px; }
+    </style>
+</head>
+<body>
+
+    <h1>Battleship - Two Player</h1>
+    <div id="message">Player 1, place your ships!</div>
+
+    <div>
+        <button onclick="selectShip(5)">Carrier (5)</button>
+        <button onclick="selectShip(4)">Battleship (4)</button>
+        <button onclick="selectShip(3)">Destroyer (3)</button>
+        <button onclick="selectShip(3)">Submarine (3)</button>
+        <button onclick="selectShip(2)">Patrol Boat (2)</button>
+    </div>
+
+    <h2>Player 1 Board</h2>
+    <div id="player1-grid" class="grid"></div>
+
+    <h2>Player 2 Board</h2>
+    <div id="player2-grid" class="grid"></div>
+
+    <button id="next-player" onclick="switchToPlayer2()" disabled>Next Player</button>
+    <button id="start-game" onclick="startGame()" disabled>Start Game</button>
+
+    <script>
+        let currentPlayer = 1;
+        let selectedShipSize = null;
+        let shipsPlaced = { 1: [], 2: [] };
+        let shipsPerPlayer = 5;
+        let placedShipsCount = { 1: 0, 2: 0 };
+        let gameStarted = false;
+        let turn = 1;
+
+        function createGrid(containerId, player) {
+            const container = document.getElementById(containerId);
+            for (let i = 0; i < 100; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.row = Math.floor(i / 10);
+                cell.dataset.col = i % 10;
+                cell.addEventListener('click', () => placeShip(cell, player));
+                container.appendChild(cell);
+            }
+        }
+
+        createGrid('player1-grid', 1);
+        createGrid('player2-grid', 2);
+
+        function selectShip(size) {
+            selectedShipSize = size;
+        }
+
+        function isPlacementValid(row, col, size, player) {
+            for (let i = 0; i < size; i++) {
+                let targetCell = document.querySelector(`#player${player}-grid [data-row="${row}"][data-col="${col + i}"]`);
+                if (!targetCell || targetCell.classList.contains('ship')) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function placeShip(cell, player) {
+            if (!selectedShipSize || placedShipsCount[player] >= shipsPerPlayer || gameStarted) return;
+
+            const row = parseInt(cell.dataset.row);
+            const col = parseInt(cell.dataset.col);
+
+            if (!isPlacementValid(row, col, selectedShipSize, player)) {
+                alert("Invalid placement! Ships cannot overlap or go out of bounds.");
+                return;
+            }
+
+            for (let i = 0; i < selectedShipSize; i++) {
+                let targetCell = document.querySelector(`#player${player}-grid [data-row="${row}"][data-col="${col + i}"]`);
+                targetCell.classList.add('ship');
+                shipsPlaced[player].push({ row, col: col + i });
+            }
+
+            placedShipsCount[player]++;
+            selectedShipSize = null;
+
+            if (placedShipsCount[1] >= shipsPerPlayer && currentPlayer === 1) {
+                document.getElementById('next-player').disabled = false;
+            } else if (placedShipsCount[2] >= shipsPerPlayer) {
+                document.getElementById('start-game').disabled = false;
+            }
+        }
+
+        function switchToPlayer2() {
+            currentPlayer = 2;
+            document.getElementById('message').textContent = "Player 2, place your ships!";
+            document.getElementById('next-player').disabled = true;
+        }
+
+        function startGame() {
+            gameStarted = true;
+            document.getElementById('message').textContent = "Game started! Player 1's turn to attack.";
+            
+            // Hide ships
+            document.querySelectorAll('.ship').forEach(cell => {
+                cell.classList.add('hidden-ship');
+            });
+
+            enableAttack();
+        }
+
+        function enableAttack() {
+            document.querySelectorAll('#player2-grid .cell').forEach(cell => {
+                cell.addEventListener('click', () => attack(cell, 2));
+            });
+            document.querySelectorAll('#player1-grid .cell').forEach(cell => {
+                cell.addEventListener('click', () => attack(cell, 1));
+            });
+        }
+
+        function attack(cell, opponent) {
+            if (!gameStarted || turn !== (opponent === 1 ? 2 : 1)) return;
+
+            const row = parseInt(cell.dataset.row);
+            const col = parseInt(cell.dataset.col);
+
+            if (cell.classList.contains('hit') || cell.classList.contains('miss')) {
+                alert("This position has already been attacked!");
+                return;
+            }
+
+            const isHit = shipsPlaced[opponent].some(ship => ship.row === row && ship.col === col);
+
+            if (isHit) {
+                cell.classList.add('hit');  // Black for hit
+                document.getElementById('message').textContent = `Player ${turn}: Hit!`;
+                shipsPlaced[opponent] = shipsPlaced[opponent].filter(ship => !(ship.row === row && ship.col === col));
+            } else {
+                cell.classList.add('miss');  // Blue for miss
+                document.getElementById('message').textContent = `Player ${turn}: Miss!`;
+            }
+
+            if (shipsPlaced[opponent].length === 0) {
+                document.getElementById('message').textContent = `Player ${turn} wins!`;
+                gameStarted = false;
+                return;
+            }
+
+            turn = turn === 1 ? 2 : 1;
+            document.getElementById('message').textContent += ` Player ${turn}'s turn.`;
+        }
+    </script>
+
+</body>
+</html>
+

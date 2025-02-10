@@ -8,8 +8,7 @@ from Levenshtein import distance as levenshtein_distance
 
 # Define ship types and their sizes
 ship_types = {
-    "battleship": 5, "cruiser": 4, "destroyer": 3, "submarine": 2,
-    "carrier": (3, 2)  # Carrier is a 3x2 rectangle
+    "carrier": 5, "battleship": 4, "destroyer": 3, "cruiser": 3, "submarine": 2
 }
 placed_ships = {}
 
@@ -84,16 +83,6 @@ def is_within_grid(row, col):
 def is_collision(ship_type, row, col, orientation):
     size = ship_types[ship_type]
 
-    if ship_type == "carrier":
-        length, width = size
-        for i in range(length):
-            for j in range(width):
-                r = row + (i if orientation == "vertically" else 0)
-                c = col + (j if orientation == "horizontally" else 0)
-                if not is_within_grid(r, c) or occupied_cells[r][c]:
-                    return True
-        return False
-
     for i in range(size):
         r = row + (i if orientation == "vertically" else 0)
         c = col + (i if orientation == "horizontally" else 0)
@@ -106,20 +95,11 @@ def is_collision(ship_type, row, col, orientation):
 def mark_cells(ship_type, row, col, orientation):
     size = ship_types[ship_type]
 
-    if ship_type == "carrier":
-        length, width = size
-        for i in range(length):
-            for j in range(width):
-                r = row + (i if orientation == "vertically" else 0)
-                c = col + (j if orientation == "horizontally" else 0)
-                if is_within_grid(r, c):
-                    occupied_cells[r][c] = True
-    else:
-        for i in range(size):
-            r = row + (i if orientation == "vertically" else 0)
-            c = col + (i if orientation == "horizontally" else 0)
-            if is_within_grid(r, c):
-                occupied_cells[r][c] = True
+    for i in range(size):
+        r = row + (i if orientation == "vertically" else 0)
+        c = col + (i if orientation == "horizontally" else 0)
+        if is_within_grid(r, c):
+            occupied_cells[r][c] = True
 
 
 def parse_placement_command(prediction, command_text):
@@ -180,4 +160,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-#File commited.
