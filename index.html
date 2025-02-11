@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battleship Game</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .game-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .board-container {
+            flex: 1;
+            min-width: 300px;
+        }
+        table { 
+            border-collapse: collapse; 
+            margin: 10px auto; 
+        }
+        td { 
+            width: 35px; 
+            height: 35px; 
+            text-align: center; 
+            border: 1px solid black; 
+            position: relative;
+        }
+        .hit { 
+            background-color: #ff4444; 
+        }
+        .miss { 
+            background-color: #44ff44; 
+        }
+        .ship { 
+            background-color: #666666; 
+        }
+        .clickable { 
+            cursor: pointer; 
+        }
+        .clickable:hover {
+            background-color: #eee;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        .hidden {
+            display: none;
+        }
+        #message {
+            padding: 10px;
+            margin: 10px 0;
+            font-weight: bold;
+            min-height: 20px;
+        }
+        .coordinate-label {
+            position: absolute;
+            font-size: 0.8em;
+            color: #666;
+        }
+        .row-label {
+            left: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .col-label {
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+    </style>
+</head>
+<body>
+    <h1>Battleship Game</h1>
+    <div id="message">Waiting for both players...</div>
+
+    <div id="shipPlacement" class="controls">
+        <h2>Place Your Ships</h2>
+        <label>Select a ship:</label>
+        <select id="shipSelect">
+            <option value="carrier">Carrier (5 cells)</option>
+            <option value="battleship">Battleship (4 cells)</option>
+            <option value="cruiser">Cruiser (3 cells)</option>
+            <option value="submarine">Submarine (3 cells)</option>
+            <option value="destroyer">Destroyer (2 cells)</option>
+        </select>
+        <button id="rotateShip">Rotate</button>
+        <button id="voiceCommandBtn">Voice Command</button>
+    </div>
+
+    <div class="game-container">
+        <div class="board-container">
+            <h2>Your Board</h2>
+            <table id="playerBoard"></table>
+        </div>
+        <div class="board-container">
+            <h2>Opponent's Board</h2>
+            <table id="opponentBoard"></table>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="finishPlacement" disabled>Finish Placement</button>
+        <button id="startGame" disabled>Start Game</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let playerNumber = 0;
+        let currentTurn = 0;
+        let placingShips = true;
+        let selectedShip = null;
+        let placedShips = {};
+        let horizontal = true;
+        let gameActive = false;
+
+        // Initialize game boards with coordinate labels
+        function createBoard(boardId) {
+            const board = document.getElementById(boardId);
+            
+            // Create column labels (0-9)
+            const headerRow = document.createElement("tr");
+            headerRow.appendChild(document.createElement("td")); // Empty corner cell
+            for (let i = 0; i < 10; i++) {
+                const th = document.createElement("td");
+                th.innerHTML = `<span class="coordinate-label col-label">${i}</span>`;
+                headerRow.appendChild(th);
+            }
+            board.appendChild(headerRow);
+            
+            // Create rows with row labels
+            for (let i = 0; i < 10; i++) {
+                const row = document.createElement("tr");
+                
+                // Add row label
+                const labelCell = document.createElement("td");
+                labelCell.innerHTML = `<span class="coordinate-label row-label">${i}</span>`;
+                row.appendChild(labelCell);
+                
+                // Add grid cells
+                for (let j = 0; j < 10; j++) {
+                    const cell = document.createElement("td");
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    cell.classList.add("grid-cell");
+                    cell.addEventListener("click", () => handleClick(boardId, i, j));
+                    row.appendChild(cell);
+                }
+                board.appendChild(row);
+            }
+        }
+
+        // Handle cell clicks
+        function handleClick(boardId, row, col) {
+            if (!gameActive) return;
+
+            if (placingShips && boardId === "playerBoard") {
+                placeShip(row, col);
+            } else if (!placingShips && boardId === "opponentBoard" && currentTurn === playerNumber) {
+                makeAttack(row, col);
+            }
+        }
+
+        // Place a ship on the board
+        function placeShip(row, col) {
+            if (!selectedShip || placedShips[selectedShip]) return;
+            
+            const shipSize = getShipSize(selectedShip);
+            const positions = [];
+
+            // Validate placement
+            for (let i = 0; i < shipSize; i++) {
+                const newRow = horizontal ? row : row + i;
+                const newCol = horizontal ? col + i : col;
+                
+                if (newRow >= 10 || newCol >= 10) {
+                    showMessage("Ship placement out of bounds!");
+                    return;
+                }
+                
+                const cell = document.querySelector(
+                    `#playerBoard td[data-row="${newRow}"][data-col="${newCol}"]`
+                );
+                if (cell.classList.contains("ship")) {
+                    showMessage("Ships cannot overlap!");
+                    return;
+                }
+                
+                positions.push({ row: newRow, col: newCol });
+            }
+
+            // Place the ship
+            positions.forEach(pos => {
+                const cell = document.querySelector(
+                    `#playerBoard td[data-row="${pos.row}"][data-col="${pos.col}"]`
+                );
+                cell.classList.add("ship");
+            });
+
+            placedShips[selectedShip] = positions;
+            socket.emit("placeShip", { 
+                shipType: selectedShip, 
+                positions 
+            });
+
+            if (Object.keys(placedShips).length === 5) {
+                document.getElementById("finishPlacement").disabled = false;
+            }
+        }
+
+        // Make an attack
+        function makeAttack(row, col) {
+            if (currentTurn !== playerNumber) {
+                showMessage("Not your turn!");
+                return;
+            }
+
+            const cell = document.querySelector(
+                `#opponentBoard td[data-row="${row}"][data-col="${col}"]`
+            );
+            if (cell.classList.contains("hit") || cell.classList.contains("miss")) {
+                showMessage("You've already attacked this position!");
+                return;
+            }
+
+            socket.emit("attack", { row, col });
+        }
+
+        // Handle voice commands
+        function handleVoiceCommand(command) {
+            console.log('Processing voice command:', command);
+            
+            const [action, ...params] = command.split(' ');
+            const commandPlayer = parseInt(params[params.length - 1]);
+            
+            if (commandPlayer !== playerNumber) {
+                console.log('Command not for this player');
+                return;
+            }
+
+            if (action === 'PLACE_SHIP') {
+                const [shipType, row, col, orientation] = params;
+                selectedShip = shipType;
+                horizontal = orientation === 'horizontally';
+                placeShip(parseInt(row), parseInt(col));
+            } else if (action === 'FIRE') {
+                const [row, col] = params;
+                makeAttack(parseInt(row), parseInt(col));
+            }
+        }
+
+        // Get ship size
+        function getShipSize(shipType) {
+            const sizes = {
+                carrier: 5,
+                battleship: 4,
+                cruiser: 3,
+                submarine: 3,
+                destroyer: 2
+            };
+            return sizes[shipType] || 0;
+        }
+
+        // Show message to user
+        function showMessage(text) {
+            const messageElement = document.getElementById("message");
+            messageElement.textContent = text;
+        }
+
+        // Set opponent board clickable state
+        function setOpponentBoardClickable(clickable) {
+            const cells = document.querySelectorAll("#opponentBoard .grid-cell");
+            cells.forEach(cell => {
+                if (clickable && !cell.classList.contains("hit") && 
+                    !cell.classList.contains("miss")) {
+                    cell.classList.add("clickable");
+                } else {
+                    cell.classList.remove("clickable");
+                }
+            });
+        }
+
+        // Event Listeners
+        document.getElementById("shipSelect").addEventListener("change", (e) => {
+            selectedShip = e.target.value;
+        });
+
+        document.getElementById("rotateShip").addEventListener("click", () => {
+            horizontal = !horizontal;
+        });
+
+        document.getElementById("finishPlacement").addEventListener("click", () => {
+            socket.emit("finishPlacingShips");
+            document.getElementById("finishPlacement").disabled = true;
+        });
+
+        document.getElementById("startGame").addEventListener("click", () => {
+            socket.emit("startGame");
+        });
+
+        document.getElementById('voiceCommandBtn').addEventListener('click', () => {
+            socket.emit('activateVoiceCommand');
+            showMessage("Voice command activated - speak now");
+        });
+
+        // Socket Event Handlers
+        socket.on('voiceCommand', handleVoiceCommand);
+
+        socket.on("playerNumber", (num) => {
+            playerNumber = num;
+            gameActive = true;
+            showMessage(num === 1 ? "Place your ships" : "Waiting for Player 1 to place ships");
+            document.getElementById("playerBoard").classList.add(`player-${num}`);
+        });
+
+        socket.on("shipPlaced", ({ shipType }) => {
+            showMessage(`${shipType} placed successfully`);
+            document.getElementById("shipSelect").value = "";
+            selectedShip = null;
+        });
+
+        socket.on("shipAlreadyPlaced", (shipType) => {
+            showMessage(`Error: ${shipType} has already been placed`);
+        });
+
+        socket.on("invalidPlacement", (shipType) => {
+            showMessage(`Error: Invalid placement for ${shipType}`);
+        });
+
+        socket.on("player2TurnToPlace", () => {
+            if (playerNumber === 2) {
+                showMessage("Your turn to place ships");
+                placingShips = true;
+                document.getElementById("shipPlacement").classList.remove("hidden");
+            } else {
+                showMessage("Player 2 is placing ships");
+            }
+        });
+
+        socket.on("readyToFinish", () => {
+            document.getElementById("finishPlacement").disabled = false;
+            showMessage("All ships placed. Click 'Finish Placement' when ready.");
+        });
+
+        socket.on("incompletePlacement", () => {
+            showMessage("Error: You must place all ships before finishing");
+            document.getElementById("finishPlacement").disabled = true;
+        });
+
+        socket.on("readyToStart", () => {
+            showMessage("Both players ready. Start the game!");
+            if (playerNumber === 1) {
+                document.getElementById("startGame").disabled = false;
+            }
+        });
+
+        socket.on("cannotStartGame", () => {
+            showMessage("Error: Cannot start game yet. Wait for both players to finish placement.");
+        });
+
+        socket.on("gameStarted", (firstTurn) => {
+            placingShips = false;
+            currentTurn = firstTurn;
+            document.getElementById("shipPlacement").classList.add("hidden");
+            document.getElementById("startGame").classList.add("hidden");
+            
+            if (currentTurn === playerNumber) {
+                showMessage("Game started! It's your turn!");
+                setOpponentBoardClickable(true);
+            } else {
+                showMessage("Game started! Waiting for opponent's move.");
+                setOpponentBoardClickable(false);
+            }
+        });
+
+        socket.on("turnUpdate", (turn) => {
+            currentTurn = turn;
+            if (turn === playerNumber) {
+                showMessage("Your turn!");
+                setOpponentBoardClickable(true);
+            } else {
+                showMessage("Opponent's turn");
+                setOpponentBoardClickable(false);
+            }
+        });
+
+        socket.on("attackResult", ({ row, col, hit, attacker }) => {
+            const board = attacker === playerNumber ? "opponentBoard" : "playerBoard";
+            const cell = document.querySelector(
+                `#${board} td[data-row="${row}"][data-col="${col}"]`
+            );
+            
+            cell.classList.add(hit ? "hit" : "miss");
+            if (board === "opponentBoard") {
+                cell.classList.remove("clickable");
+            }
+
+            if (hit) {
+                showMessage(attacker === playerNumber ? 
+                    "Hit! Wait for opponent's move." : 
+                    "Your ship was hit! Your turn."
+                );
+            } else {
+                showMessage(attacker === playerNumber ? 
+                    "Miss! Wait for opponent's move." : 
+                    "They missed! Your turn."
+                );
+            }
+        });
+
+        socket.on("alreadyAttacked", () => {
+            showMessage("Error: This position has already been attacked");
+        });
+
+        socket.on("notYourTurn", () => {
+            showMessage("Error: Not your turn");
+        });
+
+        socket.on("gameOver", ({ winner }) => {
+            gameActive = false;
+            const message = winner === playerNumber ? 
+                "Congratulations! You won the game!" : 
+                "Game Over! Your opponent won.";
+            showMessage(message);
+            setOpponentBoardClickable(false);
+        });
+
+        socket.on("gameReset", () => {
+            showMessage("Game has been reset. Waiting for both players...");
+            resetGameState();
+        });
+
+        socket.on("playerDisconnected", () => {
+            showMessage("Opponent disconnected. Game reset.");
+            resetGameState();
+        });
+
+        socket.on("gameFull", () => {
+            showMessage("Error: Game is full");
+            gameActive = false;
+        });
+
+        socket.on("error", ({ message }) => {
+            showMessage(`Error: ${message}`);
+        });
+
+        socket.on("gameState", (state) => {
+            updateGameState(state);
+        });
+
+        // Helper function to reset game state
+        function resetGameState() {
+            placingShips = true;
+            selectedShip = null;
+            placedShips = {};
+            horizontal = true;
+            gameActive = true;
+            currentTurn = 0;
+
+            // Clear both boards
+            document.querySelectorAll(".grid-cell").forEach(cell => {
+                cell.className = "grid-cell";
+            });
+
+            // Reset UI elements
+            document.getElementById("shipPlacement").classList.remove("hidden");
+            document.getElementById("startGame").classList.remove("hidden");
+            document.getElementById("finishPlacement").disabled = true;
+            document.getElementById("startGame").disabled = true;
+            document.getElementById("shipSelect").value = "";
+        }
+
+        // Helper function to update game state
+        function updateGameState(state) {
+            currentTurn = state.currentTurn;
+            placingShips = state.placementPhase;
+            gameActive = state.gameStarted;
+
+            // Update ships
+            Object.entries(state.myShips).forEach(([shipType, positions]) => {
+                positions.forEach(pos => {
+                    const cell = document.querySelector(
+                        `#playerBoard td[data-row="${pos.row}"][data-col="${pos.col}"]`
+                    );
+                    cell.classList.add("ship");
+                });
+                placedShips[shipType] = positions;
+            });
+
+            // Update hits and misses
+            state.myHits.forEach(({ row, col, hit }) => {
+                const cell = document.querySelector(
+                    `#opponentBoard td[data-row="${row}"][data-col="${col}"]`
+                );
+                cell.classList.add(hit ? "hit" : "miss");
+            });
+
+            state.enemyHits.forEach(({ row, col, hit }) => {
+                const cell = document.querySelector(
+                    `#playerBoard td[data-row="${row}"][data-col="${col}"]`
+                );
+                cell.classList.add(hit ? "hit" : "miss");
+            });
+
+            setOpponentBoardClickable(currentTurn === playerNumber && gameActive);
+        }
+
+        // Initialize boards
+        createBoard("playerBoard");
+        createBoard("opponentBoard");
+    </script>
+</body>
+</html>
